@@ -1,0 +1,25 @@
+# Channel-utilization / RF capture on the 6 GHz team link (SSL_Rione_6G, 5975 MHz)
+# ROCK 5A + Intel AX210, iwlwifi firmware 72.a764baac.0 (ty-a0-gf-a0-72)
+# Captured 2026-06-27 over wired SSH (eth0).
+
+$ iw dev wlan0 survey dump
+# (empty — see note below)
+
+# NOTE: `iw survey dump` returns NO data on the AX210 / iwlwifi mvm driver.
+# Intel's iwlwifi does not implement the nl80211 survey / channel-busy-time
+# interface (NL80211_CMD_GET_SURVEY), so channel-utilization percentage is not
+# available from this NIC. (Exit code 0, zero output lines.)
+# Channel-busy-time will instead be captured with the HackRF One spectrum sweep.
+
+$ iw dev wlan0 station dump        # available link-quality proxy
+Station be:fc:e7:37:c6:5a (on wlan0)
+	signal:  	-48 [-52, -48] dBm
+	signal avg:	-53 dBm
+	beacon signal avg:	-50 dBm
+	beacon loss:	0
+	tx retries:	0
+	tx failed:	0
+	rx drop misc:	1124
+	tx bitrate:	58.5 MBit/s HE-MCS 3 HE-NSS 2 HE-GI 2 HE-DCM 0
+	rx bitrate:	286.7 MBit/s HE-MCS 11 HE-NSS 2 HE-GI 0 HE-DCM 0
+	connected time:	273 seconds

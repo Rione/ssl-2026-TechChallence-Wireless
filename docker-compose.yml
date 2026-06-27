@@ -1,0 +1,28 @@
+# Reproducible measurement/analysis environment for the Wi-Fi Technical
+# Challenge submission. See README.md Section 3 ("Setup Instructions") and
+# MEASUREMENT.md for what each tool is used for.
+#
+# Quick start:
+#   docker-compose build
+#   docker-compose run --rm measurement python3 plot_ping_test.py ping_test.txt ping_test
+#   docker-compose run --rm measurement bash    # interactive shell
+#
+# All raw data (ping_test.txt, iperf_*.json, network_switch_test.csv, ...) and
+# plotting scripts (plot_*.py) are bind-mounted from this directory, so any
+# chart in README Section 6 can be regenerated without re-running the bench
+# tests themselves.
+
+services:
+  measurement:
+    build: .
+    container_name: ssl-rione-wifi-tc
+    volumes:
+      - .:/work
+    working_dir: /work
+    stdin_open: true
+    tty: true
+    # Uncomment below only if you want `iw`/`tcpdump` to see this machine's
+    # real wireless interfaces (e.g. to replicate the bench tests on your own
+    # hardware). Not required to replot the data already in this repo.
+    # network_mode: host
+    # privileged: true

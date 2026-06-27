@@ -1,0 +1,44 @@
+# wpa_supplicant.conf.example — Team Ri-one (Radxa ROCK 5A, Intel AX210NGW)
+#
+# Pre-configures BOTH networks used in this submission side by side:
+#   id_str="team_6g"   -> our own 6 GHz Wi-Fi 6E network  (the "team network")
+#   id_str="shared_5g" -> the TC-provided shared network  (modelled here on
+#                          5 GHz; swap in the real TC shared-network SSID/PSK
+#                          for the actual event)
+#
+# Switch between them on the robot with:
+#   wpa_cli select_network <id>
+# (id is the 0-based index in the order networks are listed below: 0, 1, ...)
+#
+# See MEASUREMENT.md:
+#   Section 10.8 - why `sae_pwe=1` is required for 6 GHz (SAE-H2E) association
+#   Section 11   - the network-switch-time benchmark built on this config
+#
+# IMPORTANT: replace every psk="…" below with your real passphrase before
+# use, and do NOT commit real credentials to a public repository. This file
+# is an *example* — keep secrets in a local, gitignored copy.
+
+country=JP
+p2p_disabled=1
+sae_pwe=1
+
+network={
+    id_str="team_6g"
+    ssid="SSL_Rione_6G"
+    key_mgmt=SAE
+    psk="…"
+    ieee80211w=2
+    scan_ssid=1
+    scan_freq=5975
+    priority=10
+}
+
+network={
+    id_str="shared_5g"
+    ssid="SSL_Rione"
+    key_mgmt=SAE
+    psk="…"
+    ieee80211w=2
+    scan_freq=5180
+    priority=5
+}

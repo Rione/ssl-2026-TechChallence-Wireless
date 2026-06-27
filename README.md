@@ -11,12 +11,12 @@ Our approach focuses on lowering the barrier of entry for new teams by relying o
 
 Our robot communication stack is built on the following hardware:
 
-| Component | Choice |
-|---|---|
-| SBC | Radxa ROCK 5A (RK3588S) |
-| Radio Module | Intel AX210NGW (Wi-Fi 6E / 802.11ax) |
-| Antenna | Standard M.2 notebook PCB antennas (~2.5 dBi gain) |
-| Interface | M.2 E-Key |
+| Component | Choice | Source |
+|---|---|---|
+| SBC | Radxa ROCK 5A (RK3588S) | [radxa.com/products/rock5](https://radxa.com/products/rock5/) |
+| Radio Module | Intel AX210NGW (Wi-Fi 6E / 802.11ax) | [Intel product specifications](https://www.intel.com/content/www/us/en/products/sku/204836/intel-wifi-6e-ax210-gig/specifications.html) |
+| Antenna | Standard M.2 notebook PCB antennas (~2.5 dBi gain) | generic COTS part, not a single fixed SKU — e.g. [MHF4 dual-band M.2 antenna kit](https://www.amazon.com/Antenna-Internal-2-4GHz-AX200-AX210/dp/B0C4QBF6HF) |
+| Interface | M.2 E-Key | — |
 
 ![Robot platform with ROCK 5A + AX210 integrated](robot_image.jpg)
 *Figure 1: Assembled robot with the Radxa ROCK 5A + Intel AX210 communication stack integrated into the chassis.*
@@ -44,19 +44,27 @@ Traditional 2.4 GHz/5 GHz Wi-Fi modules often suffer severe packet loss in crowd
 
 To make our results reproducible by any SSL team, we rely entirely on open-source Linux drivers and a containerized environment — no proprietary compilers required.
 
-- OS: Ubuntu 24.04 LTS
-- Drivers: standard Linux `iwlwifi`
-- Automation: a `docker-compose.yml` that sets up the measurement tools (`iperf3`, `tcpdump`, `iw`) and visualizes the collected data with Python scripts
+- Robot OS (ROCK 5A bench unit): Debian 13 (DietPi build)
+- Analysis/measurement container OS: Ubuntu 24.04 LTS, per the TC's reproducibility guidance — see [`Dockerfile`](Dockerfile)
+- Drivers: standard Linux `iwlwifi` (in-tree, no custom firmware)
+- Wi-Fi bring-up config: [`wpa_supplicant.conf.example`](wpa_supplicant.conf.example) — pre-configures both the team's 6 GHz network and the shared network; see [MEASUREMENT.md](MEASUREMENT.md) Sections 10.8 and 11
+- Automation: [`docker-compose.yml`](docker-compose.yml) + [`Dockerfile`](Dockerfile) install the measurement tools (`iperf3`, `tcpdump`, `iw`) and a Python/matplotlib environment that regenerates every chart in Section 6 from the raw data files already in this repo
 
 ### Setup Instructions
 
 ```bash
-git clone https://github.com/Ri-one/<your-repo>.git
-cd <your-repo>
-docker-compose up --build
-```
+git clone https://github.com/Yuzz1e/ssl-2026-TechChallence-Wireless.git
+cd ssl-2026-TechChallence-Wireless
 
-*(Replace `<your-repo>` with the final repository name before submission.)*
+# Build the analysis/measurement container
+docker-compose build
+
+# Regenerate any chart from the raw data already in this repo, e.g.:
+docker-compose run --rm measurement python3 plot_ping_test.py ping_test.txt ping_test
+
+# Or drop into an interactive shell (iperf3 / tcpdump / iw / python3 all available):
+docker-compose run --rm measurement bash
+```
 
 ## 4. Summary Data Table
 
@@ -159,13 +167,17 @@ The throughput and latency numbers are similar between bands *on a quiet bench* 
 
 ### G. Interference Detection and Channel Utilization
 
-*Pending — no `iw survey dump` or HackRF spectrum capture has been logged yet. Planned setup: a HackRF One fitted with the UNIT-C6L's antenna to visualize channel congestion, with a figure showing channel busy time vs. packet loss once collected.*
+**`iw survey dump` is not supported on the AX210.** The command returns no data: Intel's `iwlwifi` driver does not implement the nl80211 survey / channel-busy-time interface (`NL80211_CMD_GET_SURVEY`), so channel-utilization percentage cannot be read from this NIC (verified connected and post-scan; raw capture in `iw_survey_station_6ghz.txt`). As a substitute we log per-station RF metrics from `iw dev wlan0 station dump` on the 6 GHz link: **signal -48 dBm** (avg -53 dBm), **beacon loss 0**, **TX retries/failed 0/0**, RX 286.7 Mbit/s (HE-MCS 11, 2 SS) — consistent with a clean, uncongested 6 GHz channel. True channel-busy-time will instead come from a HackRF One spectrum sweep.
+
+*Spectrum capture pending — planned setup: a HackRF One fitted with the UNIT-C6L's antenna to visualize channel congestion at 5975 MHz, with a figure showing channel busy time vs. packet loss once collected.*
+
+> **Antenna caveat (found during hardware sourcing, not yet resolved):** the UNIT-C6L's two RP-SMA ports are tuned for 2.4 GHz Wi-Fi and 868–923 MHz LoRa respectively — neither is matched to the 5/6 GHz band this capture targets. The HackRF One itself tunes 1 MHz–6 GHz regardless of antenna, but reusing the UNIT-C6L's *included* antennas here will under-read 5/6 GHz signal levels. Substitute a broadband (e.g. ANT500) or dedicated 5/6 GHz antenna before running this test. Details in [MEASUREMENT.md](MEASUREMENT.md) Section 7.
 
 ![HackRF One, used for the planned spectrum capture](hackrf_one.jpg)
-*Figure 18: HackRF One SDR, to be used for the planned spectrum capture.*
+*Figure 18: HackRF One SDR ([Great Scott Gadgets](https://greatscottgadgets.com/hackrf/one/)), to be used for the planned spectrum capture.*
 
 ![UNIT-C6L, whose antenna will be paired with the HackRF One](unitc6l.jpg)
-*Figure 19: UNIT-C6L, whose antenna will be paired with the HackRF One for channel-congestion visualization.*
+*Figure 19: M5Stack UNIT-C6L ([product page](https://shop.m5stack.com/products/m5stack-c6l-unit-for-meshtastic-sx1262-esp32-c6)) — see antenna caveat above before pairing with the HackRF One.*
 
 ### H. Network-Switching Time (shared <-> team network)
 
@@ -189,8 +201,9 @@ Our approach shows that COTS Wi-Fi 6E modules like the Intel AX210 can provide a
 
 - **Confirm band/channel:** ~~needed~~ — **done** for 6 GHz (`5975 MHz`, `SSL_Rione_6G`; see [MEASUREMENT.md](MEASUREMENT.md) Section 10).
 - **Identify the access point/router** used to bridge the ROCK 5A and the base station for these bench tests, for the methodology writeup.
-- **Detect Interference:** run an `iw dev wlan0 survey dump` capture and/or a HackRF One + UNIT-C6L antenna spectrum scan, correlated with packet loss. (Setup planned, capture not yet run — image to be added once captured.)
+- **Detect Interference:** `iw dev wlan0 survey dump` is **unsupported on the AX210** (iwlwifi exposes no channel-busy-time); per-station RF metrics are logged instead (signal -48 dBm, 0 beacon loss, 0 TX retries on 6 GHz). A HackRF One + UNIT-C6L spectrum scan for channel-busy-time is still to be captured. **Note:** the UNIT-C6L's included antennas are tuned for 2.4 GHz / sub-1 GHz, not 5/6 GHz — see caveat in Section 6.G before running this capture.
 - **Power consumption (variance):** repeat idle/loaded current readings to report σ; current table entries are single bench samples.
 - ~~**Network-switching demonstration:**~~ — **measured** (see Section 6.H). Mean switch time **481 ms** to the 6 GHz team network and **326 ms** to the 5 GHz shared network; first data (ping) follows ~10–20 ms later. Still to do on-field: integrate the switch into a live friendly-match demo.
 - **eCAD/STL files:** the draft references STL files for antenna mounts; these aren't in the repo yet and are required for the open-source release.
-- **Repository URL:** the setup instructions in Section 3 still use a placeholder `<your-repo>` — replace with the final repo name/link before submitting to the mailing list.
+- ~~**Reproducible environment:**~~ — **done.** [`Dockerfile`](Dockerfile) + [`docker-compose.yml`](docker-compose.yml) now actually exist and install `iperf3`/`tcpdump`/`iw`/Python+matplotlib; [`wpa_supplicant.conf.example`](wpa_supplicant.conf.example) extracted as a real file; README Section 3's OS line corrected to the actual Debian 13 (DietPi) bench image.
+- ~~**Repository URL:**~~ — **done.** Setup instructions now point at the real repo, [github.com/Yuzz1e/ssl-2026-TechChallence-Wireless](https://github.com/Yuzz1e/ssl-2026-TechChallence-Wireless). **Still manual:** the local changes from this pass (this README, MEASUREMENT.md, and the new Dockerfile/docker-compose.yml/requirements.txt/wpa_supplicant.conf.example) are not committed/pushed yet — `git add`, `git commit`, and `git push` need to happen before the mailing-list link will show this content.

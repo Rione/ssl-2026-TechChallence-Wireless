@@ -400,18 +400,44 @@ Log timestamps at power-on and first successful reply. This was **not** used for
 
 ---
 
-## 7. Interference Detection (planned, not yet run)
+## 7. Interference Detection / Channel Utilization
 
-**Planned tools:**
+### 7.1 `iw survey dump` — not supported on the AX210
 
-| Method | Command / hardware |
+```bash
+ssh root@172.15.0.47 'iw dev wlan0 survey dump'   # -> empty (exit 0, 0 lines)
+```
+
+On this NIC the command returns **no data**. Intel's **iwlwifi** mvm driver does **not implement** the nl80211 survey / channel-busy-time interface (`NL80211_CMD_GET_SURVEY`), so channel-utilization percentage cannot be read from the AX210. We verified this both connected and right after a scan, on firmware `72.a764baac.0`. Raw capture: `iw_survey_station_6ghz.txt`.
+
+### 7.2 Available link-quality data (`iw station dump`)
+
+As a substitute for channel-busy-time we log per-station RF metrics, which the driver *does* expose. On the 6 GHz team link (`SSL_Rione_6G`, 5975 MHz):
+
+```bash
+ssh root@172.15.0.47 'iw dev wlan0 station dump'
+```
+
+| Metric | Value |
 |---|---|
-| Channel utilization (Linux) | `iw dev wlan0 survey dump` (RSSI, channel busy time) |
-| Spectrum scan | HackRF One + UNIT-C6L antenna |
+| Signal (current / avg) | **-48 dBm** / -53 dBm |
+| Beacon signal avg | -50 dBm |
+| Beacon loss | 0 |
+| TX retries / TX failed | 0 / 0 |
+| RX bitrate | 286.7 Mbit/s (HE-MCS 11, 2 SS) |
+| TX bitrate | 58.5 Mbit/s (HE-MCS 3, 2 SS) |
 
-**Planned procedure:** Log `survey dump` in the background during an `iperf3` / `ping` run; correlate channel busy % with packet loss spikes. Capture a HackRF waterfall for the operating channel.
+Strong signal (-48 dBm), zero beacon loss, and zero TX retries/failures on the 6 GHz link are consistent with the clean, uncongested spectrum argued for in README §6.C.
 
-**Status:** No capture files in this repo yet. See README Section 8 (Open Items).
+### 7.3 Spectrum scan (planned)
+
+| Method | Hardware |
+|---|---|
+| Spectrum / waterfall | HackRF One + UNIT-C6L antenna |
+
+**Status:** Because `survey dump` is unavailable on the AX210, channel-busy-time will be obtained from a **HackRF One** spectrum sweep on the operating channel (5975 MHz), correlated with packet loss. Capture not yet logged — see README Section 8 (Open Items).
+
+**Antenna caveat (found during hardware sourcing):** M5Stack's UNIT-C6L ([product page](https://shop.m5stack.com/products/m5stack-c6l-unit-for-meshtastic-sx1262-esp32-c6)) ships two RP-SMA ports — one antenna tuned for **2.4 GHz Wi-Fi**, one for **868–923 MHz LoRa** ([docs](https://docs.m5stack.com/en/unit/Unit_C6L)). Neither is matched to the **5/6 GHz** band this capture targets. The HackRF One ([greatscottgadgets.com](https://greatscottgadgets.com/hackrf/one/)) itself tunes 1 MHz–6 GHz regardless of antenna, but reusing the UNIT-C6L's *included* antennas here will under-read 5/6 GHz signal levels. Substitute a broadband (e.g. ANT500) or dedicated 5/6 GHz antenna before running this test.
 
 ---
 
@@ -543,6 +569,8 @@ network={
 
 Without `sae_pwe=1`, `wpa_supplicant` logs `SAE H2E disabled` / `skip - rate sets do not match` and stays in `SCANNING`.
 
+This config (combined with the Section 11.1 dual-network version) is saved in the repo root as [`wpa_supplicant.conf.example`](wpa_supplicant.conf.example) for release/reproducibility.
+
 ---
 
 ## 11. Network-Switching Time (shared <-> team network)
@@ -560,6 +588,8 @@ sae_pwe=1
 network={ id_str="team_6g"   ssid="SSL_Rione_6G" key_mgmt=SAE psk="…" ieee80211w=2 scan_ssid=1 scan_freq=5975 priority=10 }
 network={ id_str="shared_5g" ssid="SSL_Rione"    key_mgmt=SAE psk="…" ieee80211w=2 scan_freq=5180 priority=5 }
 ```
+
+This exact config is saved in the repo root as [`wpa_supplicant.conf.example`](wpa_supplicant.conf.example).
 
 ### 11.2 Method
 
@@ -604,6 +634,7 @@ Both networks share the `172.15.0.0/22` subnet, so the DHCP lease is retained ac
 | `network_switch_test.csv` | Network-switch timing (5 trials each direction) |
 | `plot_network_switch.py` | Switch-time chart |
 | `network_switch_test.png` | 6 GHz ↔ 5 GHz switch-time figure |
+| `iw_survey_station_6ghz.txt` | survey dump (empty/unsupported) + station RF capture |
 
 ---
 
@@ -611,10 +642,12 @@ Both networks share the `172.15.0.0/22` subnet, so the DHCP lease is retained ac
 
 1. ~~**Band confirmation:** Document `iw dev wlan0 link` showing **6 GHz** operation~~ — **done** (5975 MHz, `SSL_Rione_6G`; see Section 10).
 2. **Access point identity:** Model/name of AP bridging robot and base station.
-3. **Interference captures:** `iw survey dump` and/or HackRF spectrum data.
+3. **Interference captures:** `iw survey dump` is **unsupported on the AX210** (Section 7.1); HackRF spectrum sweep for channel-busy-time still to capture. **Antenna mismatch found** (Section 7.3): UNIT-C6L's included antennas are tuned for 2.4 GHz/sub-1 GHz, not 5/6 GHz — substitute before capturing.
 4. **Power σ:** Repeated ammeter samples.
 5. ~~**Network-switching demo:**~~ — **bench-measured** (Section 11: 481 ms → 6 GHz team, 326 ms → 5 GHz shared). Still to do: integrate into a live friendly-match demo.
-6. **README OS line:** ROCK 5A bench image is **Debian 13 (DietPi)**, not Ubuntu 24.04 — align README Section 3 with actual image or note planned migration.
+6. ~~**README OS line:**~~ — **done.** README Section 3 now lists Debian 13 (DietPi) as the robot OS and Ubuntu 24.04 as the analysis-container OS (see `Dockerfile`).
+7. ~~**Reproducible environment:**~~ — **done.** `Dockerfile`, `docker-compose.yml`, `requirements.txt`, and `wpa_supplicant.conf.example` added to the repo; README Setup Instructions now match what's actually here.
+8. ~~**Repository URL:**~~ — **done.** README Section 3 now points at the real repo, `github.com/Yuzz1e/ssl-2026-TechChallence-Wireless`. **Still manual:** commit and push the local changes from this pass before the mailing-list link reflects them.
 
 ---
 
