@@ -1,0 +1,585 @@
+# Measurement Methodology — Team Ri-one (Wi-Fi TC 2026)
+
+This document describes **how each metric in the submission was measured**, including exact commands, topology, raw-tool output, post-processing scripts, and known limitations. Results themselves are summarized in [README.md](README.md) Section 4.
+
+---
+
+## 1. Test Topology and Endpoints
+
+| Role | Device | IP address | OS / notes |
+|---|---|---|---|
+| Robot (client / sender) | Radxa ROCK 5A + Intel AX210NGW | `172.15.0.47` (eth0) / `172.15.0.49` (wlan0, 6 GHz DHCP) / `172.15.0.22` (wlan0, 5 GHz DHCP) | Debian 13 (DietPi), kernel `6.1.115-vendor-rk35xx`, `iperf 3.18`, SSH user `root` |
+| Base station (server / receiver) | macOS | `172.15.0.44` | `iperf 3.21`, ICMP ping source for baseline tests |
+| Default gateway / DHCP | (AP or router) | `172.15.0.1` | Assigns wlan0 address via DHCP (e.g. `172.15.0.22` during 5 GHz runs) |
+
+**SSH / management:** use `ssh root@172.15.0.47` over **eth0**. Throughput tests bind to the robot's **wlan0** address (`-B 172.15.0.49` on 6 GHz, `172.15.0.22` on 5 GHz).
+
+**Traffic direction for throughput tests:** ROCK 5A → macOS (robot transmits, base station receives).
+
+**Wireless link — 5 GHz bench (2026-06-27, superseded for TC claim):**
+
+```
+SSID: SSL_Rione
+BSSID: be:fc:e7:37:c6:59
+Frequency: 5180 MHz (channel 36, 20 MHz width) — 5 GHz
+```
+
+**Wireless link — 6 GHz bench (2026-06-27, primary for Wi-Fi 6E claim):**
+
+```
+SSID: SSL_Rione_6G
+BSSID: be:fc:e7:37:c6:5a
+Frequency: 5975 MHz (channel 21, 6 GHz band)
+Signal: -51 dBm
+TX rate: 286.7 Mbit/s (802.11ax HE-MCS 11, 2 spatial streams)
+Security: WPA3-Personal (SAE, H2E)
+Robot wlan0 DHCP: 172.15.0.49
+```
+
+> **Note:** 6 GHz association requires `sae_pwe=1` in the global section of `wpa_supplicant.conf` (SAE Hash-to-Element). See Section 10.
+
+---
+
+## 2. Software Versions
+
+| Tool | ROCK 5A | macOS |
+|---|---|---|
+| iperf3 | 3.18 | 3.21 |
+| ping | iputils (Linux) | macOS built-in |
+| Wi-Fi driver | `iwlwifi` (in-tree) | — |
+| Plotting | — | Python 3 + matplotlib (`plot_*.py` in this repo) |
+
+---
+
+## 3. Round-Trip Latency (ICMP Ping)
+
+### 3.1 Idle baseline (long soak test)
+
+**Goal:** Measure RTT distribution with no competing traffic.
+
+**Command (macOS → ROCK 5A):**
+
+```bash
+ping 172.15.0.22 -i 0.016 -c 7625 > ping_test.txt
+```
+
+| Flag | Meaning |
+|---|---|
+| `-i 0.016` | Inter-packet interval **0.016 s** (~62.5 probes/s), modelling **60 FPS** telemetry cadence |
+| `-c 7625` | Fixed probe count (7625 × 0.016 s ≈ **122 s** wall time at full rate) |
+
+**Raw output file:** `ping_test.txt`
+
+**Summary line (from capture):**
+
+```
+7625 packets transmitted, 7623 packets received, 0.0% packet loss
+round-trip min/avg/max/stddev = 0.931/1.560/19.224/0.716 ms
+```
+
+**Post-processing:**
+
+```bash
+python3 plot_ping_test.py ping_test.txt ping_test
+```
+
+Generates `ping_test.png` / `ping_test.pdf` (time series + histogram).
+
+**Reported metrics:**
+
+| Statistic | Value |
+|---|---|
+| Mean RTT | 1.56 ms |
+| Std. dev. (σ) | 0.72 ms |
+| Max RTT | 19.22 ms |
+| Packet loss | 0.00% (2 probes unacknowledged at end of capture — likely test stop, not link loss) |
+
+---
+
+### 3.2 Latency under 20 Mbps UDP load
+
+**Goal:** Measure RTT while the robot streams 20 Mbps UDP (NPU debug-stream profile).
+
+**Procedure:**
+
+1. Start iperf3 server on macOS (IPv4 only):
+
+   ```bash
+   iperf3 -s -p 5201 -4
+   ```
+
+2. Start UDP stream from ROCK 5A (background):
+
+   ```bash
+   ssh root@172.15.0.22 "iperf3 -c 172.15.0.44 -p 5201 -u -b 20M -t 100"
+   ```
+
+3. While the stream runs, ping **both directions** for ~98 s (1 probe/s):
+
+   ```bash
+   # macOS → ROCK 5A
+   ping -c 98 -i 1 172.15.0.22 > ping_during_udp_20mbps.txt
+
+   # ROCK 5A → macOS
+   ssh root@172.15.0.22 "ping -c 98 -i 1 172.15.0.44" > ping_during_udp_20mbps_from_rock5a.txt
+   ```
+
+**Raw output files:**
+
+- `ping_during_udp_20mbps.txt`
+- `ping_during_udp_20mbps_from_rock5a.txt`
+
+**Summary (from captures):**
+
+| Direction | Mean RTT | Min / Max | Loss |
+|---|---|---|---|
+| macOS → ROCK 5A | 1.92 ms | 1.18 / 3.23 ms | 0.0% (98/98) |
+| ROCK 5A → macOS | 1.67 ms | 1.09 / 3.31 ms | 0.0% (98/98) |
+
+**Post-processing:**
+
+```bash
+python3 plot_ping_test.py ping_during_udp_20mbps.txt ping_during_udp_20mbps \
+  "During 20 Mbps UDP (ROCK 5A -> macOS)"
+
+python3 plot_ping_test.py ping_during_udp_20mbps_from_rock5a.txt ping_during_udp_20mbps_from_rock5a \
+  "During 20 Mbps UDP | Ping from sender"
+
+python3 plot_latency_comparison.py
+```
+
+Generates per-direction plots and `latency_udp_20mbps_comparison.png` / `.pdf`.
+
+**Note:** iperf3 UDP **jitter** (inter-arrival time variance at the receiver) is a different quantity from ICMP RTT. Do not compare them directly.
+
+---
+
+## 4. Throughput / Data Rate (iperf3)
+
+**Common setup:**
+
+| Side | Command |
+|---|---|
+| macOS (server) | `iperf3 -s -p 5201 -4` |
+| ROCK 5A (client) | `iperf3 -c 172.15.0.44 -p 5201 …` |
+
+`-4` forces the server to listen on IPv4. Without it, macOS may bind IPv6-only and the ROCK 5A client gets `Connection refused`.
+
+All runs: **100 s duration**, **1 s reporting interval** (`-i 1`), JSON output (`-J`), UDP runs include `--get-server-output` (embeds server-side loss/jitter text in the JSON).
+
+---
+
+### 4.1 TCP — maximum achievable bandwidth
+
+**Command (ROCK 5A):**
+
+```bash
+iperf3 -c 172.15.0.44 -p 5201 -t 100 -i 1 -J
+```
+
+No `-b` flag → TCP sends as fast as congestion control allows.
+
+| Parameter | Value |
+|---|---|
+| Protocol | TCP |
+| Block size | 131,072 bytes (iperf default for this path) |
+| MSS | 1,448 bytes |
+| Congestion control | `cubic` |
+| Timestamp (UTC) | 2026-06-27 06:01:54 |
+
+**Raw output:** `iperf_tcp_max_bandwidth_test.json`
+
+**Post-processing:**
+
+```bash
+python3 plot_iperf_tcp_bandwidth.py
+```
+
+**Reported metrics (base-station-received / `sum_received`):**
+
+| Metric | Value |
+|---|---|
+| Mean throughput | 207.2 Mbps |
+| Per-interval σ (1 s bins) | 20.8 Mbps |
+| Peak instantaneous | 249.2 Mbps |
+| Total retransmits (100 s) | 27 |
+| Mean TCP RTT (sender `tcp_info`, under load) | 23.2 ms |
+| RTT range | 8.6 – 60.2 ms |
+
+---
+
+### 4.2 UDP — 200 Mbps target (link ceiling)
+
+**Command (ROCK 5A):**
+
+```bash
+iperf3 -c 172.15.0.44 -p 5201 -u -b 200M -t 100 -i 1 -J --get-server-output \
+  > iperf_udp_test.json
+```
+
+| Parameter | Value |
+|---|---|
+| Target bitrate | 200 Mbps |
+| Datagram size | 1,448 bytes |
+| Timestamp (UTC) | 2026-06-27 06:23:44 |
+
+**Reported metrics (receiver / `sum_received`):**
+
+| Metric | Value |
+|---|---|
+| Mean throughput | 188.0 Mbps |
+| Per-interval σ | 3.8 Mbps |
+| Packet loss | 0.043% (696 / 1,623,711 datagrams) |
+| Jitter | 0.031 ms |
+
+Loss clustered around **t ≈ 8–9 s** (up to 408 datagrams/s, 2.5% in that 1 s bin).
+
+**Post-processing:** `python3 plot_iperf_udp.py iperf_udp_test.json iperf_udp_test`
+
+---
+
+### 4.3 UDP — 20 Mbps target (NPU debug-stream profile)
+
+**Command (ROCK 5A):**
+
+```bash
+iperf3 -c 172.15.0.44 -p 5201 -u -b 20M -t 100 -i 1 -J --get-server-output \
+  > iperf_udp_20mbps_test.json
+```
+
+| Parameter | Value |
+|---|---|
+| Target bitrate | 20 Mbps |
+| Timestamp (UTC) | 2026-06-27 06:26:42 |
+
+**Reported metrics (receiver):**
+
+| Metric | Value |
+|---|---|
+| Mean throughput | 20.00 Mbps |
+| Per-interval σ | 0.007 Mbps |
+| Packet loss | 0.00% |
+| Jitter | 0.15 ms |
+
+**Post-processing:** `python3 plot_iperf_udp.py iperf_udp_20mbps_test.json iperf_udp_20mbps_test`
+
+---
+
+### 4.4 How throughput statistics are computed
+
+1. **Raw data:** iperf3 JSON `intervals[].sum.bits_per_second` (1 s bins).
+2. **Mean:** `end.sum_received.bits_per_second` (entire run, receiver side for UDP; `sum_received` for TCP).
+3. **Std. dev. (σ):** standard deviation of per-interval `bits_per_second` values over the 100 s run, converted to Mbps.
+4. **Loss (UDP):** parsed from `server_output_text` embedded in JSON (receiver-side `Lost/Total Datagrams` per interval); total from `end.sum_received.lost_packets`.
+5. **Plots:** `plot_iperf_tcp_bandwidth.py` (throughput + TCP RTT + retransmits), `plot_iperf_udp.py` (throughput + jitter + per-second loss).
+
+---
+
+## 5. Start-Up Time (Association + DHCP)
+
+**Goal:** Time from interface bring-up to a usable IP address, as required by the TC template.
+
+**Measurement approach:** `systemd-analyze` on the ROCK 5A, cross-checked with `journalctl` timestamps for `wpa_supplicant` and `dhclient`.
+
+### 5.1 Commands
+
+```bash
+# Overall boot time
+systemd-analyze
+
+# Per-unit time (sorted slowest first)
+systemd-analyze blame | grep -iE 'network|wlan|ifup|dhcp'
+
+# Dependency chain to network-online
+systemd-analyze critical-chain network-online.target
+
+# Wi-Fi / DHCP event log for current boot
+journalctl -b -u 'ifup@wlan0.service' --no-pager
+```
+
+### 5.2 `systemd-analyze` output (captured 2026-06-27)
+
+```
+Startup finished in 2.367s (kernel) + 9.408s (userspace) = 11.776s
+graphical.target reached after 9.407s in userspace.
+```
+
+**Network-related `blame` entries:**
+
+| Unit | Time |
+|---|---|
+| `ifup@wlan0.service` | **7.155 s** |
+| `ifup@eth0.service` | 5.120 s |
+| `ifupdown-pre.service` | 335 ms |
+| `networking.service` | 156 ms |
+
+**`critical-chain network-online.target`:**
+
+```
+network-online.target @9.351s
+└─network.target @9.351s
+  └─ifup@wlan0.service @2.194s +7.155s
+    └─network-pre.target @2.187s
+      └─dietpi-preboot.service @1.874s +310ms
+        └─dietpi-ramlog.service @1.778s +88ms
+          └─…
+```
+
+Interpretation:
+
+- `ifup@wlan0.service` **starts** ~2.19 s after power-on and **runs for 7.16 s** → finishes ~9.35 s.
+- **`network-online.target`** is reached at **9.35 s** (includes DietPi pre-boot services before Wi-Fi starts).
+
+### 5.3 Journal timeline (`ifup@wlan0.service`, same boot)
+
+| Wall-clock time | Event |
+|---|---|
+| 04:38:18 | `Starting ifup@wlan0.service` |
+| 04:38:22 | `wpa_supplicant`: `CTRL-EVENT-CONNECTED` (SSID `SSL_Rione`, **5180 MHz**) |
+| 04:38:24 | `dhclient`: `DHCPACK` of `172.15.0.22` from `172.15.0.1` |
+| 04:38:25 | `dhclient`: `bound to 172.15.0.22` |
+| 04:38:25 | `Finished ifup@wlan0.service` |
+
+**Durations from `ifup` start:**
+
+| Milestone | Δt |
+|---|---|
+| Wi-Fi associated | **~4 s** |
+| DHCP lease bound | **~7 s** |
+| `ifup@wlan0.service` complete | **7.16 s** (systemd) |
+
+**Value reported in summary table:** **7.16 s** = `ifup@wlan0.service` duration (association + DHCP). End-to-end until `network-online.target`: **9.35 s**.
+
+### 5.4 Reproducing on a fresh boot
+
+```bash
+ssh root@172.15.0.47 'reboot'
+# wait for host to return, then:
+ssh root@172.15.0.47 'systemd-analyze blame; journalctl -b -u ifup@wlan0.service --no-pager'
+```
+
+For a stricter “first ping succeeds” metric (alternative definition):
+
+```bash
+# on macOS, after power-cycling the robot:
+while ! ping -c 1 -W 1 172.15.0.22; do sleep 0.1; done
+```
+
+Log timestamps at power-on and first successful reply. This was **not** used for the current table entry.
+
+---
+
+## 6. Power Consumption
+
+**Goal:** Robot-side current draw at 12 V, idle vs. full link load.
+
+### 6.1 Setup
+
+| Item | Detail |
+|---|---|
+| Measurement point | **12 V DC input** to the robot (ROCK 5A + AX210 module) |
+| Instrument | Bench ammeter (single reading per condition) |
+| Idle condition | `wlan0` up, associated, **no** `iperf3` / `ping` traffic |
+| Loaded condition | During **TCP max-bandwidth test** (~208 Mbps received at base station) |
+
+### 6.2 Results (single sample each)
+
+| Condition | Current | Power (12 V × I) |
+|---|---|---|
+| Idle | **0.17 A** | **2.0 W** |
+| TCP loaded | **0.26 A** | **3.1 W** |
+| Δ (loaded − idle) | **+0.09 A** | **+1.1 W** |
+
+### 6.3 Limitations
+
+- **No variance (σ) yet** — each condition is one manual reading.
+- Current includes entire ROCK 5A board, not AX210 module in isolation.
+- Loaded reading taken during TCP (not UDP 20 Mbps); TCP draws more due to higher throughput and CPU.
+
+**Planned improvement:** N repeated samples per condition; report mean ± σ.
+
+---
+
+## 7. Interference Detection (planned, not yet run)
+
+**Planned tools:**
+
+| Method | Command / hardware |
+|---|---|
+| Channel utilization (Linux) | `iw dev wlan0 survey dump` (RSSI, channel busy time) |
+| Spectrum scan | HackRF One + UNIT-C6L antenna |
+
+**Planned procedure:** Log `survey dump` in the background during an `iperf3` / `ping` run; correlate channel busy % with packet loss spikes. Capture a HackRF waterfall for the operating channel.
+
+**Status:** No capture files in this repo yet. See README Section 8 (Open Items).
+
+---
+
+## 10. 6 GHz Bench Tests (2026-06-27)
+
+Same methodology as Sections 3–4, but on **6 GHz** (`SSL_Rione_6G`, 5975 MHz).
+
+> **Critical:** ROCK 5A has **eth0 and wlan0 on the same `/22` subnet**. With both interfaces up, `ip route get 172.15.0.44 from 172.15.0.49` selects **`dev eth0`** even when iperf binds `-B 172.15.0.49` — traffic leaks to wired (~800 Mbps). **Before each throughput run:** `ip link set eth0 down` on the robot and confirm `ip route get … dev wlan0`. SSH to the robot via **`172.15.0.49`** while eth0 is down.
+
+```bash
+# on ROCK 5A (via ssh root@172.15.0.49 after eth0 down)
+iperf3 -c 172.15.0.44 -p 5201 -B 172.15.0.49 …
+```
+
+### 10.1 Idle latency (60 FPS cadence)
+
+```bash
+ping 172.15.0.49 -i 0.016 -c 7625 > ping_test_6ghz.txt
+```
+
+| Statistic | Value |
+|---|---|
+| Probes | 7,625 (0.0% loss) |
+| Mean RTT | 1.45 ms |
+| Std. dev. (σ) | 0.37 ms |
+| Max RTT | 18.27 ms |
+| Wall time | ~122 s at 60 FPS (`-i 0.016` s) |
+
+**Post-processing:** `python3 plot_ping_test.py ping_test_6ghz.txt ping_test_6ghz "6 GHz | 60 FPS idle baseline"`
+
+### 10.2 Latency under 20 Mbps UDP load
+
+```bash
+# macOS → ROCK 5A (wlan0)
+ping -c 98 -i 1 172.15.0.49 > ping_during_udp_20mbps_6ghz.txt
+
+# ROCK 5A → macOS
+ssh root@172.15.0.47 "ping -c 98 -i 1 -I wlan0 172.15.0.44" > ping_during_udp_20mbps_from_rock5a_6ghz.txt
+```
+
+| Direction | Mean RTT | Min / Max | Loss |
+|---|---|---|---|
+| macOS → ROCK 5A | 1.62 ms | 1.07 / 2.53 ms | 0.0% (98/98) |
+| ROCK 5A → macOS | 1.65 ms | 1.22 / 2.48 ms | 0.0% (98/98) |
+
+**Comparison plot:** `python3 plot_latency_comparison.py --6ghz`
+
+### 10.3 Throughput (iperf3, 100 s each)
+
+| Test | Command suffix | Mean (receiver) | σ | Loss / retransmits | Jitter (UDP) |
+|---|---|---|---|---|---|
+| TCP greedy | `-t 100 -i 1 -J` | **203.9 Mbps** | 21.9 Mbps | 262 retransmits | — |
+| UDP 200 Mbps | `-u -b 200M … --get-server-output` | **188.8 Mbps** | — | 0.020% | 0.032 ms |
+| UDP 20 Mbps | `-u -b 20M … --get-server-output` | **20.0 Mbps** | — | 0.00% | 0.071 ms |
+
+TCP mean RTT under load: **16.9 ms** (WiFi path; earlier **823 Mbps** figure was invalid — measured with eth0 up, traffic routed over wired).
+
+**Post-test link rate** (`iw dev wlan0 link`): tx **270.8 Mbit/s** HE-MCS 11, 2 SS, 5975 MHz.
+
+**Raw files:** `iperf_tcp_max_bandwidth_test_6ghz.json`, `iperf_udp_test_6ghz.json`, `iperf_udp_20mbps_test_6ghz.json`
+
+**Plots:**
+
+```bash
+python3 plot_iperf_tcp_bandwidth.py iperf_tcp_max_bandwidth_test_6ghz.json iperf_tcp_max_bandwidth_test_6ghz
+python3 plot_iperf_udp.py iperf_udp_test_6ghz.json iperf_udp_test_6ghz
+python3 plot_iperf_udp.py iperf_udp_20mbps_test_6ghz.json iperf_udp_20mbps_test_6ghz
+```
+
+### 10.4 5 GHz vs 6 GHz summary
+
+| Metric | 5 GHz (`SSL_Rione`, 5180 MHz) | 6 GHz (`SSL_Rione_6G`, 5975 MHz) |
+|---|---|---|
+| Idle ping mean | 1.56 ms | 1.45 ms |
+| TCP throughput (recv, WiFi only) | 207 Mbps | **204 Mbps** |
+| UDP 200 Mbps achieved | 188 Mbps | **189 Mbps** |
+| UDP 20 Mbps loss | 0.00% | 0.00% |
+| Loaded ping (macOS→robot) | 1.92 ms | 1.62 ms |
+
+6 GHz and 5 GHz throughput are **similar on this bench** (same AP hardware, different band). The decisive 6 GHz advantage is **channel availability and DFS-freedom**, not raw Mbps — see 10.6.
+
+### 10.6 Regulatory channel map (DFS vs 6 GHz) — basis for the band-selection argument
+
+Captured on the ROCK 5A with `iw phy phy0 channels` (country `JP`):
+
+```bash
+ssh root@172.15.0.47 'iw phy phy0 channels | grep -c "5[0-9][0-9][0-9] MHz"'   # 5 GHz channel entries
+ssh root@172.15.0.47 'iw phy phy0 channels | grep -ic "radar detection"'        # DFS channels
+ssh root@172.15.0.47 'iw phy phy0 channels | awk "/595[0-9]|6[0-9][0-9][0-9] MHz/" | grep -vc disabled'  # usable 6 GHz
+```
+
+| Metric (JP) | 5 GHz | 6 GHz |
+|---|---|---|
+| Channel entries listed | 40 | 50 |
+| **Radar-detection (DFS) channels** | **16** (ch 52–64, 100–144) | **0** |
+| Non-DFS usable 20 MHz channels | **8** (ch 36–48, 149–165) | **22** |
+| CAC (Channel Availability Check) before TX | up to 60 s on DFS | none |
+| Radar event → forced channel vacate | yes | no |
+
+**Implication:** On 5 GHz, over half the channels require DFS (CAC delay + radar-eviction risk → multi-second link blackout during a match), leaving only 8 heavily-congested non-DFS channels. On 6 GHz the same AX210 sees **zero DFS channels** and **22 clean, immediately-usable channels**, enabling wide (80/160 MHz) operation without channel-planning constraints. This — not peak Mbps — is the core reason the design targets the 6 GHz band of Wi-Fi 6E.
+
+### 10.7 Band-comparison plots
+
+```bash
+python3 plot_band_comparison.py
+# -> band_comparison_throughput.{png,pdf}  (TCP/UDP throughput + RTT, 5 GHz vs 6 GHz)
+# -> band_comparison_spectrum.{png,pdf}    (JP usable vs DFS channel counts)
+```
+
+`plot_band_comparison.py` reads the existing 5 GHz and 6 GHz iperf/ping result files plus the hard-coded JP channel counts from 10.6 (`non_dfs` / `dfs`). Update those counts if the regulatory map changes.
+
+### 10.5 6 GHz Wi-Fi bring-up (`wpa_supplicant`)
+
+6 GHz APs advertising **SAE-H2E only** require a global `sae_pwe=1` in `/etc/wpa_supplicant/wpa_supplicant.conf`:
+
+```ini
+country=JP
+p2p_disabled=1
+sae_pwe=1
+
+network={
+    ssid="SSL_Rione_6G"
+    key_mgmt=SAE
+    psk="…"
+    ieee80211w=2
+    scan_ssid=1
+}
+```
+
+Without `sae_pwe=1`, `wpa_supplicant` logs `SAE H2E disabled` / `skip - rate sets do not match` and stays in `SCANNING`.
+
+---
+
+## 11. Output File Index
+
+| File | Contents |
+|---|---|
+| `ping_test.txt` | Idle ICMP soak (7,625 probes) |
+| `ping_during_udp_20mbps.txt` | ICMP under 20 Mbps UDP, macOS → robot |
+| `ping_during_udp_20mbps_from_rock5a.txt` | ICMP under 20 Mbps UDP, robot → macOS |
+| `iperf_tcp_max_bandwidth_test.json` | TCP 100 s, greedy |
+| `iperf_udp_test.json` | UDP 100 s, 200 Mbps target |
+| `iperf_udp_20mbps_test.json` | UDP 100 s, 20 Mbps target |
+| `plot_ping_test.py` | Ping → PNG/PDF |
+| `plot_iperf_tcp_bandwidth.py` | TCP iperf JSON → PNG/PDF |
+| `plot_iperf_udp.py` | UDP iperf JSON → PNG/PDF |
+| `plot_latency_comparison.py` | Idle vs. loaded ping comparison chart (`--6ghz` for 6 GHz files) |
+| `plot_band_comparison.py` | 5 GHz vs 6 GHz throughput/latency + JP channel-map figures |
+| `band_comparison_throughput.png` | 5 GHz vs 6 GHz throughput & latency bars |
+| `band_comparison_spectrum.png` | JP usable vs DFS channel counts |
+| `ping_test_6ghz.txt` | 6 GHz idle ICMP (7,625 probes, 60 FPS) |
+| `ping_during_udp_20mbps_6ghz.txt` | 6 GHz ICMP under 20 Mbps UDP, macOS → robot |
+| `ping_during_udp_20mbps_from_rock5a_6ghz.txt` | 6 GHz ICMP under 20 Mbps UDP, robot → macOS |
+| `iperf_tcp_max_bandwidth_test_6ghz.json` | 6 GHz TCP 100 s |
+| `iperf_udp_test_6ghz.json` | 6 GHz UDP 100 s, 200 Mbps target |
+| `iperf_udp_20mbps_test_6ghz.json` | 6 GHz UDP 100 s, 20 Mbps target |
+
+---
+
+## 12. Known Gaps Before Final Submission
+
+1. ~~**Band confirmation:** Document `iw dev wlan0 link` showing **6 GHz** operation~~ — **done** (5975 MHz, `SSL_Rione_6G`; see Section 10).
+2. **Access point identity:** Model/name of AP bridging robot and base station.
+3. **Interference captures:** `iw survey dump` and/or HackRF spectrum data.
+4. **Power σ:** Repeated ammeter samples.
+5. **Network-switching demo:** TC rule — switch between shared Wi-Fi and team network during a friendly match.
+6. **README OS line:** ROCK 5A bench image is **Debian 13 (DietPi)**, not Ubuntu 24.04 — align README Section 3 with actual image or note planned migration.
+
+---
+
+*Last updated: 2026-06-27 — reflects bench tests in this repository.*
