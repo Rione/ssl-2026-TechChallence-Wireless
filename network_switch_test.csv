@@ -1,0 +1,11 @@
+trial,direction,target_ssid,freq_mhz,switch_ms,first_ping_ms
+1,to_6G_team,SSL_Rione_6G,5975,352,349
+2,to_6G_team,SSL_Rione_6G,5975,479,368
+3,to_6G_team,SSL_Rione_6G,5975,636,
+4,to_6G_team,SSL_Rione_6G,5975,542,
+5,to_6G_team,SSL_Rione_6G,5975,396,
+1,to_5G_shared,SSL_Rione,5180,457,316
+2,to_5G_shared,SSL_Rione,5180,236,367
+3,to_5G_shared,SSL_Rione,5180,320,362
+4,to_5G_shared,SSL_Rione,5180,307,
+5,to_5G_shared,SSL_Rione,5180,310,

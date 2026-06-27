@@ -167,6 +167,20 @@ The throughput and latency numbers are similar between bands *on a quiet bench* 
 ![UNIT-C6L, whose antenna will be paired with the HackRF One](unitc6l.jpg)
 *Figure 19: UNIT-C6L, whose antenna will be paired with the HackRF One for channel-congestion visualization.*
 
+### H. Network-Switching Time (shared <-> team network)
+
+The official rules require demonstrating a quick switch between the TC-provided shared Wi-Fi network and the team's own network. We modelled this with two real SSIDs on the bench — the **team network** `SSL_Rione_6G` (6 GHz, WPA3-SAE) and a **shared network** `SSL_Rione` (5 GHz, WPA3-SAE) — both pre-configured in `wpa_supplicant`, switched with `wpa_cli select_network`. Control/SSH ran over **wired eth0** so the Wi-Fi link could be torn down and rebuilt without losing the management channel.
+
+![Network switching time](network_switch_test.png)
+*Figure 20: Association switch time between the 6 GHz team network and the 5 GHz shared network (5 trials each direction).*
+
+| Switch target | Mean | Min / Max | First data (ping) |
+|---|---|---|---|
+| → 6 GHz team (`SSL_Rione_6G`) | **481 ms** | 352 / 636 ms | assoc + ~10–20 ms |
+| → 5 GHz shared (`SSL_Rione`) | **326 ms** | 236 / 457 ms | assoc + ~10–20 ms |
+
+**Analysis:** Both directions complete the full re-association (scan + SAE authentication + key handshake) in **well under one second**, and because both networks share the same `/22` subnet the DHCP lease is retained, so the first packet flows ~10–20 ms after association — effectively a sub-second, near-seamless handover for a robot mid-match. The slightly higher cost of switching *to* 6 GHz comes from a required 6 GHz scan that re-acquires the Wi-Fi 6E self-managed regulatory domain (the AX210 disables 6 GHz channels while associated to 5 GHz, then re-enables them on hearing a 6 GHz beacon); switching *to* 5 GHz needs no such step. Raw data, the benchmark script, and the procedure are in [MEASUREMENT.md](MEASUREMENT.md) Section 11.
+
 ## 7. Conclusion
 
 Our approach shows that COTS Wi-Fi 6E modules like the Intel AX210 can provide a highly accessible, low-cost, and robust communication link for SSL robots. Paired with the ROCK 5A, it clears the bandwidth bottleneck for Edge-AI applications while avoiding the congested 2.4/5 GHz spectrum entirely. We encourage other teams to consider this architecture as a way to reduce hardware-development overhead — directly in line with the Technical Challenge's goal of lowering the barrier to entry for new and existing teams.
@@ -177,6 +191,6 @@ Our approach shows that COTS Wi-Fi 6E modules like the Intel AX210 can provide a
 - **Identify the access point/router** used to bridge the ROCK 5A and the base station for these bench tests, for the methodology writeup.
 - **Detect Interference:** run an `iw dev wlan0 survey dump` capture and/or a HackRF One + UNIT-C6L antenna spectrum scan, correlated with packet loss. (Setup planned, capture not yet run — image to be added once captured.)
 - **Power consumption (variance):** repeat idle/loaded current readings to report σ; current table entries are single bench samples.
-- **Network-switching demonstration:** the official rules require demonstrating quick switching between the TC-provided shared Wi-Fi network and the team's own network during a short friendly match — not yet tested (see the switching procedure discussed earlier in this conversation).
+- ~~**Network-switching demonstration:**~~ — **measured** (see Section 6.H). Mean switch time **481 ms** to the 6 GHz team network and **326 ms** to the 5 GHz shared network; first data (ping) follows ~10–20 ms later. Still to do on-field: integrate the switch into a live friendly-match demo.
 - **eCAD/STL files:** the draft references STL files for antenna mounts; these aren't in the repo yet and are required for the open-source release.
 - **Repository URL:** the setup instructions in Section 3 still use a placeholder `<your-repo>` — replace with the final repo name/link before submitting to the mailing list.

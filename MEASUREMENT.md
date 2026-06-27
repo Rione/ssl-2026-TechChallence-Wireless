@@ -523,7 +523,7 @@ python3 plot_band_comparison.py
 
 `plot_band_comparison.py` reads the existing 5 GHz and 6 GHz iperf/ping result files plus the hard-coded JP channel counts from 10.6 (`non_dfs` / `dfs`). Update those counts if the regulatory map changes.
 
-### 10.5 6 GHz Wi-Fi bring-up (`wpa_supplicant`)
+### 10.8 6 GHz Wi-Fi bring-up (`wpa_supplicant`)
 
 6 GHz APs advertising **SAE-H2E only** require a global `sae_pwe=1` in `/etc/wpa_supplicant/wpa_supplicant.conf`:
 
@@ -545,7 +545,40 @@ Without `sae_pwe=1`, `wpa_supplicant` logs `SAE H2E disabled` / `skip - rate set
 
 ---
 
-## 11. Output File Index
+## 11. Network-Switching Time (shared <-> team network)
+
+**Goal:** Quantify how fast the robot switches between the **TC-provided shared network** and the **team's own network** (official TC rule). Modelled with two real SSIDs: team = `SSL_Rione_6G` (6 GHz, WPA3-SAE), shared = `SSL_Rione` (5 GHz, WPA3-SAE).
+
+### 11.1 Setup
+
+Both networks pre-configured in one `wpa_supplicant.conf` (`id 0` = 6 GHz team, `id 1` = 5 GHz shared), each WPA3-SAE with `ieee80211w=2` (5 GHz AP rejects non-PMF clients with `status_code=31`). **Control/SSH over wired eth0 (`172.15.0.47`)** so the Wi-Fi link can be torn down without losing the session.
+
+```ini
+country=JP
+p2p_disabled=1
+sae_pwe=1
+network={ id_str="team_6g"   ssid="SSL_Rione_6G" key_mgmt=SAE psk="…" ieee80211w=2 scan_ssid=1 scan_freq=5975 priority=10 }
+network={ id_str="shared_5g" ssid="SSL_Rione"    key_mgmt=SAE psk="…" ieee80211w=2 scan_freq=5180 priority=5 }
+```
+
+### 11.2 Method
+
+`/tmp/switch_bench.sh` (on the robot) issues `wpa_cli select_network <id>` and polls `wpa_cli status` every 50 ms, timing from `select_network` to `wpa_state=COMPLETED` (scan + SAE auth + 4-way key handshake). 5 trials each direction.
+
+> **6 GHz regdom caveat:** while associated to 5 GHz the AX210's self-managed regdom drops to WORLD and **disables the 6 GHz channels** (`iw phy phy0 channels` shows `5975 MHz (disabled)`). Switching *to* 6 GHz therefore first runs `iw dev wlan0 scan freq 5975` to hear the 6 GHz beacon and re-enable the channel — this scan is the dominant cost of the 6 GHz direction.
+
+### 11.3 Results
+
+| Switch target | Mean | Min / Max | First data (ping) |
+|---|---|---|---|
+| → 6 GHz team (`SSL_Rione_6G`) | **481 ms** | 352 / 636 ms | assoc + ~10–20 ms |
+| → 5 GHz shared (`SSL_Rione`) | **326 ms** | 236 / 457 ms | assoc + ~10–20 ms |
+
+Both networks share the `172.15.0.0/22` subnet, so the DHCP lease is retained across the switch and the first ICMP reply lands ~10–20 ms after `COMPLETED` (no L3 re-acquisition delay). Raw data: `network_switch_test.csv`. Plot: `python3 plot_network_switch.py`.
+
+---
+
+## 12. Output File Index
 
 | File | Contents |
 |---|---|
@@ -568,16 +601,19 @@ Without `sae_pwe=1`, `wpa_supplicant` logs `SAE H2E disabled` / `skip - rate set
 | `iperf_tcp_max_bandwidth_test_6ghz.json` | 6 GHz TCP 100 s |
 | `iperf_udp_test_6ghz.json` | 6 GHz UDP 100 s, 200 Mbps target |
 | `iperf_udp_20mbps_test_6ghz.json` | 6 GHz UDP 100 s, 20 Mbps target |
+| `network_switch_test.csv` | Network-switch timing (5 trials each direction) |
+| `plot_network_switch.py` | Switch-time chart |
+| `network_switch_test.png` | 6 GHz ↔ 5 GHz switch-time figure |
 
 ---
 
-## 12. Known Gaps Before Final Submission
+## 13. Known Gaps Before Final Submission
 
 1. ~~**Band confirmation:** Document `iw dev wlan0 link` showing **6 GHz** operation~~ — **done** (5975 MHz, `SSL_Rione_6G`; see Section 10).
 2. **Access point identity:** Model/name of AP bridging robot and base station.
 3. **Interference captures:** `iw survey dump` and/or HackRF spectrum data.
 4. **Power σ:** Repeated ammeter samples.
-5. **Network-switching demo:** TC rule — switch between shared Wi-Fi and team network during a friendly match.
+5. ~~**Network-switching demo:**~~ — **bench-measured** (Section 11: 481 ms → 6 GHz team, 326 ms → 5 GHz shared). Still to do: integrate into a live friendly-match demo.
 6. **README OS line:** ROCK 5A bench image is **Debian 13 (DietPi)**, not Ubuntu 24.04 — align README Section 3 with actual image or note planned migration.
 
 ---
