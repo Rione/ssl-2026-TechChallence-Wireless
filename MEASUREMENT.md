@@ -429,13 +429,36 @@ ssh root@172.15.0.47 'iw dev wlan0 station dump'
 
 Strong signal (-48 dBm), zero beacon loss, and zero TX retries/failures on the 6 GHz link are consistent with the clean, uncongested spectrum argued for in README §6.C.
 
-### 7.3 Spectrum scan (planned)
+### 7.3 HackRF spectrum sweep — 5 GHz band (idle vs. loaded)
 
-| Method | Hardware |
+Because `survey dump` is unavailable on the AX210, channel occupancy was instead measured with a **HackRF One** (`hackrf_sweep`, SDR++/`hackrf_sweep` CSV format). The full 5 GHz band (5150–5910 MHz) was swept twice each in two conditions:
+
+| File | Condition |
 |---|---|
-| Spectrum / waterfall | HackRF One + UNIT-C6L antenna |
+| `out_base.csv` | Idle — no traffic on the 5 GHz shared network |
+| `out.csv` | 5 GHz shared network (`SSL_Rione`, ch36 / 5180 MHz) under load |
 
-**Status:** Because `survey dump` is unavailable on the AX210, channel-busy-time will be obtained from a **HackRF One** spectrum sweep on the operating channel (5975 MHz), correlated with packet loss. Capture not yet logged — see README Section 8 (Open Items).
+```bash
+# CSV columns: date, time, hz_low, hz_high, hz_bin_width, num_samples, dB, dB, ...
+hackrf_sweep -f 5150:5910 -w 1000000 -r out_base.csv   # idle
+hackrf_sweep -f 5150:5910 -w 1000000 -r out.csv        # under load
+python3 plot_spectrum_sweep.py                          # -> spectrum_sweep_5ghz.png
+```
+
+`plot_spectrum_sweep.py` averages the sweep passes per 1 MHz bin (in the linear power domain), overlays the two conditions, and plots the smoothed `load − baseline` delta.
+
+**Results:**
+
+| Metric | Value |
+|---|---|
+| Operating-channel carrier (5180 MHz) | sharp peak ~8–10 dB above noise floor in both captures |
+| Mean power 5170–5250 MHz (smoothed) | baseline -57.3 dBm → loaded -57.0 dBm (Δ +0.3 dB) |
+| Peak Δ (load − baseline) | +11.2 dB @ 5690 MHz |
+| Noise floor | ≈ -60 dBm/MHz across the band |
+
+The persistent 5180 MHz carrier confirms the shared network's channel, and the broadly positive load−baseline delta (especially across the busy DFS/upper-UNII region) shows the 5 GHz band is occupied and contended — the congestion the 6 GHz team link (5975 MHz) avoids. See README Figure 18 (`spectrum_sweep_5ghz.png`).
+
+**Limitations:** the HackRF One tunes only to 6000 MHz, so the 6 GHz operating channel (5975 MHz) sits at the very edge of its range and the UNIT-C6L antennas are not matched to 5/6 GHz — an equivalent **6 GHz** sweep needs a 6 GHz-capable front-end (see README Section 8 Open Items).
 
 **Antenna caveat (found during hardware sourcing):** M5Stack's UNIT-C6L ([product page](https://shop.m5stack.com/products/m5stack-c6l-unit-for-meshtastic-sx1262-esp32-c6)) ships two RP-SMA ports — one antenna tuned for **2.4 GHz Wi-Fi**, one for **868–923 MHz LoRa** ([docs](https://docs.m5stack.com/en/unit/Unit_C6L)). Neither is matched to the **5/6 GHz** band this capture targets. The HackRF One ([greatscottgadgets.com](https://greatscottgadgets.com/hackrf/one/)) itself tunes 1 MHz–6 GHz regardless of antenna, but reusing the UNIT-C6L's *included* antennas here will under-read 5/6 GHz signal levels. Substitute a broadband (e.g. ANT500) or dedicated 5/6 GHz antenna before running this test.
 
@@ -635,6 +658,9 @@ Both networks share the `172.15.0.0/22` subnet, so the DHCP lease is retained ac
 | `plot_network_switch.py` | Switch-time chart |
 | `network_switch_test.png` | 6 GHz ↔ 5 GHz switch-time figure |
 | `iw_survey_station_6ghz.txt` | survey dump (empty/unsupported) + station RF capture |
+| `out_base.csv` / `out.csv` | HackRF 5 GHz sweep — idle / under load |
+| `spectrum_sweep_5ghz.png` | 5 GHz spectrum idle-vs-load comparison figure |
+| `plot_spectrum_sweep.py` | script generating the sweep comparison figure |
 
 ---
 

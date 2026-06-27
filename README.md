@@ -169,22 +169,25 @@ The throughput and latency numbers are similar between bands *on a quiet bench* 
 
 **`iw survey dump` is not supported on the AX210.** The command returns no data: Intel's `iwlwifi` driver does not implement the nl80211 survey / channel-busy-time interface (`NL80211_CMD_GET_SURVEY`), so channel-utilization percentage cannot be read from this NIC (verified connected and post-scan; raw capture in `iw_survey_station_6ghz.txt`). As a substitute we log per-station RF metrics from `iw dev wlan0 station dump` on the 6 GHz link: **signal -48 dBm** (avg -53 dBm), **beacon loss 0**, **TX retries/failed 0/0**, RX 286.7 Mbit/s (HE-MCS 11, 2 SS) — consistent with a clean, uncongested 6 GHz channel. True channel-busy-time will instead come from a HackRF One spectrum sweep.
 
-*Spectrum capture pending — planned setup: a HackRF One fitted with the UNIT-C6L's antenna to visualize channel congestion at 5975 MHz, with a figure showing channel busy time vs. packet loss once collected.*
+**HackRF spectrum sweep (5 GHz band).** Because `survey dump` is unavailable, we captured the spectrum with a HackRF One (`hackrf_sweep`, 1 MHz bins, 2 passes) over the full 5 GHz band (5150–5910 MHz), once **idle** (`out_base.csv`) and once with the **5 GHz shared network under load** (`out.csv`). The overlay below confirms the shared network's operating channel: a sharp, persistent carrier at **5180 MHz (ch36, `SSL_Rione`)** stands ~8–10 dB above the noise floor in both captures, and under load the smoothed power across the band rises by roughly **+0.3 dB on the operating channel and up to +11 dB on busy adjacent/DFS channels** — i.e. the 5 GHz band is occupied and contended. This is exactly the congestion that the 6 GHz team link (5975 MHz) avoids. (The HackRF tops out at 6000 MHz, so the 6 GHz channel itself sits at the very edge of its range; a 6 GHz-capable front-end is still needed for an equivalent 6 GHz capture.)
+
+![5 GHz spectrum: idle vs. under load](spectrum_sweep_5ghz.png)
+*Figure 18: 5 GHz HackRF sweep — idle baseline (grey) vs. shared network under load (red). Top: power spectrum (faint = raw 1 MHz bins, bold = 9-MHz rolling average); the dashed line marks `SSL_Rione` ch36 (5180 MHz) and the shaded region the JP DFS channels. Bottom: smoothed load − baseline delta (red = added energy under load).*
 
 > **Antenna caveat (found during hardware sourcing, not yet resolved):** the UNIT-C6L's two RP-SMA ports are tuned for 2.4 GHz Wi-Fi and 868–923 MHz LoRa respectively — neither is matched to the 5/6 GHz band this capture targets. The HackRF One itself tunes 1 MHz–6 GHz regardless of antenna, but reusing the UNIT-C6L's *included* antennas here will under-read 5/6 GHz signal levels. Substitute a broadband (e.g. ANT500) or dedicated 5/6 GHz antenna before running this test. Details in [MEASUREMENT.md](MEASUREMENT.md) Section 7.
 
-![HackRF One, used for the planned spectrum capture](hackrf_one.jpg)
-*Figure 18: HackRF One SDR ([Great Scott Gadgets](https://greatscottgadgets.com/hackrf/one/)), to be used for the planned spectrum capture.*
+![HackRF One, used for the spectrum capture](hackrf_one.jpg)
+*Figure 19: HackRF One SDR ([Great Scott Gadgets](https://greatscottgadgets.com/hackrf/one/)) used for the 5 GHz sweep above.*
 
 ![UNIT-C6L, whose antenna will be paired with the HackRF One](unitc6l.jpg)
-*Figure 19: M5Stack UNIT-C6L ([product page](https://shop.m5stack.com/products/m5stack-c6l-unit-for-meshtastic-sx1262-esp32-c6)) — see antenna caveat above before pairing with the HackRF One.*
+*Figure 20: M5Stack UNIT-C6L ([product page](https://shop.m5stack.com/products/m5stack-c6l-unit-for-meshtastic-sx1262-esp32-c6)) — see antenna caveat above before pairing with the HackRF One.*
 
 ### H. Network-Switching Time (shared <-> team network)
 
 The official rules require demonstrating a quick switch between the TC-provided shared Wi-Fi network and the team's own network. We modelled this with two real SSIDs on the bench — the **team network** `SSL_Rione_6G` (6 GHz, WPA3-SAE) and a **shared network** `SSL_Rione` (5 GHz, WPA3-SAE) — both pre-configured in `wpa_supplicant`, switched with `wpa_cli select_network`. Control/SSH ran over **wired eth0** so the Wi-Fi link could be torn down and rebuilt without losing the management channel.
 
 ![Network switching time](network_switch_test.png)
-*Figure 20: Association switch time between the 6 GHz team network and the 5 GHz shared network (5 trials each direction).*
+*Figure 21: Association switch time between the 6 GHz team network and the 5 GHz shared network (5 trials each direction).*
 
 | Switch target | Mean | Min / Max | First data (ping) |
 |---|---|---|---|
@@ -201,7 +204,7 @@ Our approach shows that COTS Wi-Fi 6E modules like the Intel AX210 can provide a
 
 - **Confirm band/channel:** ~~needed~~ — **done** for 6 GHz (`5975 MHz`, `SSL_Rione_6G`; see [MEASUREMENT.md](MEASUREMENT.md) Section 10).
 - **Identify the access point/router** used to bridge the ROCK 5A and the base station for these bench tests, for the methodology writeup.
-- **Detect Interference:** `iw dev wlan0 survey dump` is **unsupported on the AX210** (iwlwifi exposes no channel-busy-time); per-station RF metrics are logged instead (signal -48 dBm, 0 beacon loss, 0 TX retries on 6 GHz). A HackRF One + UNIT-C6L spectrum scan for channel-busy-time is still to be captured. **Note:** the UNIT-C6L's included antennas are tuned for 2.4 GHz / sub-1 GHz, not 5/6 GHz — see caveat in Section 6.G before running this capture.
+- **Detect Interference:** `iw dev wlan0 survey dump` is **unsupported on the AX210** (iwlwifi exposes no channel-busy-time); per-station RF metrics are logged instead (signal -48 dBm, 0 beacon loss, 0 TX retries on 6 GHz). A HackRF One **5 GHz sweep is now captured** (idle vs. loaded, `out_base.csv`/`out.csv`, Figure 18). **Still to do:** an equivalent capture on the 6 GHz operating channel (needs a 6 GHz front-end, since the HackRF tops out at 6000 MHz and the UNIT-C6L antennas are tuned for 2.4 GHz / sub-1 GHz — see caveat in Section 6.G).
 - **Power consumption (variance):** repeat idle/loaded current readings to report σ; current table entries are single bench samples.
 - ~~**Network-switching demonstration:**~~ — **measured** (see Section 6.H). Mean switch time **481 ms** to the 6 GHz team network and **326 ms** to the 5 GHz shared network; first data (ping) follows ~10–20 ms later. Still to do on-field: integrate the switch into a live friendly-match demo.
 - **eCAD/STL files:** the draft references STL files for antenna mounts; these aren't in the repo yet and are required for the open-source release.
