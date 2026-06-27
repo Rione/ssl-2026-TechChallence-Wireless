@@ -467,26 +467,34 @@ Channel occupancy was measured with a **HackRF One** (`hackrf_sweep`, SDR++/`hac
 | File | Condition |
 |---|---|
 | `out_base.csv` | Idle — no traffic on the 5 GHz shared network |
-| `out.csv` | 5 GHz shared network (`SSL_Rione`, ch36 / 5180 MHz) under load |
+| `out.csv` | 5 GHz shared network (`SSL_Rione`, ch36 / 5180 MHz) under **TCP upload load** (ROCK 5A → base-station server, `iperf3 -P 4`) |
 
 ```bash
 # CSV columns: date, time, hz_low, hz_high, hz_bin_width, num_samples, dB, dB, ...
-hackrf_sweep -f 5150:5910 -w 1000000 -r out_base.csv   # idle
-hackrf_sweep -f 5150:5910 -w 1000000 -r out.csv        # under load
-python3 plot_spectrum_sweep.py                          # -> spectrum_sweep_5ghz.png
+hackrf_sweep -f 5150:5910 -w 1000000 -N 50 -r out_base.csv   # idle
+# While iperf3 upload runs on ROCK 5A (wlan0 -> server):
+hackrf_sweep -f 5150:5910 -w 1000000 -N 50 -r out.csv
+python3 plot_spectrum_sweep.py   # -> spectrum_sweep_5ghz.png, spectrum_sweep_5ghz_ch36.png
 ```
 
-`plot_spectrum_sweep.py` averages the sweep passes per 1 MHz bin (in the linear power domain), overlays the two conditions, and plots the smoothed `load − baseline` delta.
+`plot_spectrum_sweep.py` averages the sweep passes per 1 MHz bin (in the linear power domain), overlays the two conditions, and plots the smoothed `load − baseline` delta. Two figures are generated: **full band** (5150–5910 MHz, 9-MHz smoothing) and **ch36 zoom** (5160–5220 MHz, 3-MHz smoothing).
 
 **Results:**
 
 | Metric | Value |
 |---|---|
-| Operating-channel carrier (5180 MHz) | sharp peak ~8–10 dB above noise floor |
+| Operating-channel carrier (5180 MHz) | sharp peak ~8–10 dB above noise floor (AP beacon, both conditions) |
+| Upload load effect (ch36 zoom) | up to **~+6 dB** at 5175–5178 MHz vs. idle baseline |
 | Activity across band | multiple carriers spread over 5150–5910 MHz |
 | Noise floor | ≈ -60 dBm/MHz across the band |
 
-The persistent 5180 MHz carrier confirms the shared network's operating channel, and further activity is visible across the 5 GHz band — the incumbent occupancy that a 6 GHz (Wi-Fi 6E) link avoids. See README Figure 18 (`spectrum_sweep_5ghz.png`).
+Wi-Fi uses the same 20 MHz channel for uplink and downlink (time-multiplexed); the ch36 delta is **not** a separate UL/DL frequency split — upload DATA frames add RF energy on the shared channel, most visible where the always-on beacon does not dominate.
+
+![5 GHz spectrum — full band](spectrum_sweep_5ghz.png)
+*Full band (5150–5910 MHz): band-wide incumbent occupancy. README Figure 18.*
+
+![5 GHz spectrum — ch36 zoom](spectrum_sweep_5ghz_ch36.png)
+*ch36 zoom (5160–5220 MHz): upload load on the operating channel. README Figure 19.*
 
 **Next step:** an equivalent sweep on the 6 GHz operating channel (5975 MHz), captured with a 6 GHz-capable front-end (the HackRF One tunes up to 6000 MHz).
 
@@ -687,7 +695,8 @@ Both networks share the `172.15.0.0/22` subnet, so the DHCP lease is retained ac
 | `network_switch_test.png` | 6 GHz ↔ 5 GHz switch-time figure |
 | `iw_survey_station_6ghz.txt` | 6 GHz station RF capture (signal / retries / bitrate) |
 | `out_base.csv` / `out.csv` | HackRF 5 GHz sweep — idle / under load |
-| `spectrum_sweep_5ghz.png` | 5 GHz spectrum idle-vs-load comparison figure |
+| `spectrum_sweep_5ghz.png` | 5 GHz spectrum idle-vs-load comparison (full band) |
+| `spectrum_sweep_5ghz_ch36.png` | 5 GHz spectrum zoom on SSL_Rione ch36 (5160-5220 MHz) |
 | `plot_spectrum_sweep.py` | script generating the sweep comparison figure |
 
 ---

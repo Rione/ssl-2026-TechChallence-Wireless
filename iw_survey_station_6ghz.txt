@@ -18,4 +18,4 @@ Station be:fc:e7:37:c6:5a (on wlan0)
 # Strong signal (-48 dBm), zero beacon loss, and zero TX retries/failures are
 # consistent with a clean, uncongested 6 GHz channel.
 # Channel-occupancy of the 5 GHz band is captured separately with the HackRF
-# One sweep (out_base.csv / out.csv -> spectrum_sweep_5ghz.png).
+# HackRF sweep: out_base.csv / out.csv -> spectrum_sweep_5ghz.png, spectrum_sweep_5ghz_ch36.png

@@ -100,7 +100,7 @@ docker-compose run --rm measurement bash
 | Round-Trip Latency | Idle (60 FPS, n=7,625): Mean **1.45 ms**, σ 0.37 ms, Max 18.27 ms. Under 20 Mbps UDP: Mean **1.62 ms** (base→robot) / **1.65 ms** (robot→base), Max 2.53 ms (n=98 each) | Idle: 1.56 ms; loaded: 1.92 / 1.67 ms |
 | Average Packet Loss | **0.00%** in every 6 GHz run (7,625/7,625 idle ICMP; 0/98 loaded ICMP; 0% UDP at 20 Mbps) | Same (0% at operational rates) |
 | Data Rate (base station, received) | TCP: Mean **203.9 Mbps**, σ 21.9 Mbps, 262 retransmits/100 s (eth0 down, WiFi only). UDP 200 Mbps: **188.8 Mbps**, 0.02% loss. UDP 20 Mbps: **20.00 Mbps**, 0.00% loss | TCP: 207 Mbps; UDP 200M: 188 Mbps |
-| Detect Interference | Per-station RF metrics logged on the 6 GHz link (signal -48 dBm, 0 beacon loss/retries). HackRF One 5 GHz sweep captured, idle vs. loaded (Section 6.G), confirming the 5180 MHz operating channel and incumbent activity across the band. 6 GHz-band sweep planned next |
+| Detect Interference | Per-station RF metrics logged on the 6 GHz link (signal -48 dBm, 0 beacon loss/retries). HackRF One 5 GHz sweep captured idle vs. TCP upload load — full band + ch36 zoom (Section 6.G, Figures 18–19). 6 GHz-band sweep planned next |
 | Start Up Time | **7.16 s** (`ifup@wlan0.service`, association + DHCP via `systemd-analyze blame`). From journal timestamps on the same boot: Wi-Fi associated ~4 s after `ifup` start, DHCP lease bound ~7 s after `ifup` start; `network-online.target` reached **9.35 s** after power-on (includes pre-network dependencies) |
 | Power Consumption | **12 V** bench supply, robot-side (ROCK 5A + AX210). Idle (link up, no traffic): **0.17 A** (2.0 W). Loaded (TCP max-bandwidth test, ~208 Mbps): **0.26 A** (3.1 W). Single sample per condition — variance not yet characterized |
 | Cost | ~$20 USD (AX210NGW module + M.2 antennas) — bill-of-materials estimate, not a bench measurement |
@@ -121,7 +121,7 @@ Detailed procedures (commands, `systemd-analyze` output, iperf flags, post-proce
   - UDP, 20 Mbps target, to model the actual NPU debug-data stream profile
 - **Start-up time:** on the ROCK 5A, read `systemd-analyze blame` and `systemd-analyze critical-chain network-online.target` to isolate Wi-Fi bring-up; `ifup@wlan0.service` duration is reported as association + DHCP time. Cross-checked against `journalctl -b -u ifup@wlan0.service` for `wpa_supplicant` association and `dhclient` lease timestamps.
 - **Power consumption:** measured at the robot's **12 V** input with a bench ammeter — one reading at idle (interface up, no `iperf`/ping traffic) and one during the TCP max-bandwidth run (~208 Mbps received at the base station).
-- **Interference monitoring:** per-station RF metrics (signal, beacon loss, TX retries) are logged on the 6 GHz link via `iw dev wlan0 station dump`, and the 5 GHz band is captured with a HackRF One spectrum sweep (idle vs. loaded) to visualize incumbent channel occupancy.
+- **Interference monitoring:** per-station RF metrics (signal, beacon loss, TX retries) are logged on the 6 GHz link via `iw dev wlan0 station dump`, and the 5 GHz band is captured with a HackRF One spectrum sweep (idle vs. TCP upload load; full-band and ch36 zoom figures in Section 6.G).
 
 ## 6. Results and Analysis
 
@@ -196,23 +196,26 @@ We characterized the RF environment two complementary ways: per-station link met
 
 **6 GHz link quality (`iw dev wlan0 station dump`).** On the team link (`SSL_Rione_6G`, 5975 MHz): **signal -48 dBm** (avg -53 dBm), **beacon loss 0**, **TX retries/failed 0/0**, RX 286.7 Mbit/s (HE-MCS 11, 2 SS). A strong signal with zero beacon loss and zero retries is exactly what a clean, uncongested 6 GHz channel looks like. Raw capture: `iw_survey_station_6ghz.txt`.
 
-**HackRF spectrum sweep (5 GHz band).** We captured the spectrum with a HackRF One (`hackrf_sweep`, 1 MHz bins) over the full 5 GHz band (5150–5910 MHz), once **idle** (`out_base.csv`) and once with the **5 GHz shared network under load** (`out.csv`). The overlay below shows the shared network's operating channel clearly: a sharp, persistent carrier at **5180 MHz (ch36, `SSL_Rione`)** stands ~8–10 dB above the noise floor, with further activity spread across the band — the kind of incumbent occupancy a 6 GHz (Wi-Fi 6E) link avoids. An equivalent capture on the 6 GHz operating channel is planned next (a 6 GHz-capable front-end is needed, as the HackRF One tunes up to 6000 MHz).
+**HackRF spectrum sweep (5 GHz band).** We captured the spectrum with a HackRF One (`hackrf_sweep`, 1 MHz bins, 50 passes) over the full 5 GHz band (5150–5910 MHz), once **idle** (`out_base.csv`) and once with the **5 GHz shared network under TCP upload load** — ROCK 5A → base-station server over `SSL_Rione` ch36 (`out.csv`). Wi-Fi uses the same 20 MHz channel for uplink and downlink (time-multiplexed, not frequency-split); the full-band view shows incumbent occupancy across 5 GHz, while the ch36 zoom shows how upload traffic raises RF energy on the operating channel above the always-on AP beacon. An equivalent capture on the 6 GHz operating channel is planned next (a 6 GHz-capable front-end is needed, as the HackRF One tunes up to 6000 MHz).
 
-![5 GHz spectrum: idle vs. under load](spectrum_sweep_5ghz.png)
-*Figure 18: 5 GHz HackRF sweep — idle baseline (grey) vs. shared network under load (red). Top: power spectrum (faint = raw 1 MHz bins, bold = 9-MHz rolling average); the dashed line marks `SSL_Rione` ch36 (5180 MHz) and the shaded region the JP DFS channels. Bottom: smoothed load − baseline delta.*
+![5 GHz spectrum: idle vs. under upload load (full band)](spectrum_sweep_5ghz.png)
+*Figure 18: 5 GHz HackRF sweep — full band (5150–5910 MHz). Idle baseline (grey) vs. shared network under TCP upload load (red). Top: power spectrum (faint = raw 1 MHz bins, bold = 9-MHz rolling average); the dashed line marks `SSL_Rione` ch36 (5180 MHz) and the shaded region the JP DFS channels. Bottom: smoothed load − baseline delta. Use this view for band-wide incumbent occupancy.*
+
+![5 GHz spectrum: idle vs. under upload load (ch36 zoom)](spectrum_sweep_5ghz_ch36.png)
+*Figure 19: ch36 zoom (5160–5220 MHz) of the same capture. The 20 MHz channel span (5170–5190 MHz) is shaded in blue. Upload load lifts power by up to ~6 dB around 5175–5178 MHz; the persistent beacon carrier at ~5186 MHz is present in both conditions (Wi-Fi UL/DL share the same channel — the asymmetry is not a separate UL/DL frequency allocation).*
 
 ![HackRF One, used for the spectrum capture](hackrf_one.jpg)
-*Figure 19: HackRF One SDR ([Great Scott Gadgets](https://greatscottgadgets.com/hackrf/one/)) used for the 5 GHz sweep above.*
+*Figure 20: HackRF One SDR ([Great Scott Gadgets](https://greatscottgadgets.com/hackrf/one/)) used for the 5 GHz sweep above.*
 
 ![UNIT-C6L companion radio module](unitc6l.jpg)
-*Figure 20: M5Stack UNIT-C6L ([product page](https://shop.m5stack.com/products/m5stack-c6l-unit-for-meshtastic-sx1262-esp32-c6)).*
+*Figure 21: M5Stack UNIT-C6L ([product page](https://shop.m5stack.com/products/m5stack-c6l-unit-for-meshtastic-sx1262-esp32-c6)).*
 
 ### H. Network-Switching Time (shared <-> team network)
 
 The official rules require demonstrating a quick switch between the TC-provided shared Wi-Fi network and the team's own network. We modelled this with two real SSIDs on the bench — the **team network** `SSL_Rione_6G` (6 GHz, WPA3-SAE) and a **shared network** `SSL_Rione` (5 GHz, WPA3-SAE) — both pre-configured in `wpa_supplicant`, switched with `wpa_cli select_network`. Control/SSH ran over **wired eth0** so the Wi-Fi link could be torn down and rebuilt without losing the management channel.
 
 ![Network switching time](network_switch_test.png)
-*Figure 21: Association switch time between the 6 GHz team network and the 5 GHz shared network (5 trials each direction).*
+*Figure 22: Association switch time between the 6 GHz team network and the 5 GHz shared network (5 trials each direction).*
 
 | Switch target | Mean | Min / Max | First data (ping) |
 |---|---|---|---|
@@ -229,7 +232,7 @@ Our approach shows that COTS Wi-Fi 6E modules like the Intel AX210 can provide a
 
 - **Confirm band/channel:** ~~needed~~ — **done** for 6 GHz (`5975 MHz`, `SSL_Rione_6G`; see [MEASUREMENT.md](MEASUREMENT.md) Section 10).
 - **Identify the access point/router** used to bridge the ROCK 5A and the base station for these bench tests, for the methodology writeup.
-- **Detect Interference:** per-station RF metrics are logged on the 6 GHz link (signal -48 dBm, 0 beacon loss, 0 TX retries) and a HackRF One **5 GHz sweep is captured** (idle vs. loaded, `out_base.csv`/`out.csv`, Figure 18). **Still to do:** an equivalent sweep on the 6 GHz operating channel (with a 6 GHz-capable front-end).
+- **Detect Interference:** per-station RF metrics are logged on the 6 GHz link (signal -48 dBm, 0 beacon loss, 0 TX retries) and a HackRF One **5 GHz sweep is captured** (idle vs. upload-loaded, `out_base.csv`/`out.csv`, Figures 18–19). **Still to do:** an equivalent sweep on the 6 GHz operating channel (with a 6 GHz-capable front-end).
 - **Power consumption (variance):** repeat idle/loaded current readings to report σ; current table entries are single bench samples.
 - ~~**Network-switching demonstration:**~~ — **measured** (see Section 6.H). Mean switch time **481 ms** to the 6 GHz team network and **326 ms** to the 5 GHz shared network; first data (ping) follows ~10–20 ms later. Still to do on-field: integrate the switch into a live friendly-match demo.
 - **eCAD/STL files:** the draft references STL files for antenna mounts; these still aren't in this repo and are required for the open-source release. The radio path itself has no eCAD (COTS-only by design); the team's mainboard PCB design (Section 2) is published separately at [Rione/ssl-Circuit](https://github.com/Rione/ssl-Circuit).
