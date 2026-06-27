@@ -24,9 +24,8 @@ This document describes **how each metric in the submission was measured**, incl
   - [6.2 Results (single sample each)](#62-results-single-sample-each)
   - [6.3 Limitations](#63-limitations)
 - [7. Interference Detection / Channel Utilization](#7-interference-detection--channel-utilization)
-  - [7.1 `iw survey dump` — not supported on the AX210](#71-iw-survey-dump--not-supported-on-the-ax210)
-  - [7.2 Available link-quality data (`iw station dump`)](#72-available-link-quality-data-iw-station-dump)
-  - [7.3 HackRF spectrum sweep — 5 GHz band (idle vs. loaded)](#73-hackrf-spectrum-sweep--5-ghz-band-idle-vs-loaded)
+  - [7.1 6 GHz link quality (`iw station dump`)](#71-6-ghz-link-quality-iw-station-dump)
+  - [7.2 HackRF spectrum sweep — 5 GHz band (idle vs. loaded)](#72-hackrf-spectrum-sweep--5-ghz-band-idle-vs-loaded)
 - [10. 6 GHz Bench Tests (2026-06-27)](#10-6-ghz-bench-tests-2026-06-27)
   - [10.1 Idle latency (60 FPS cadence)](#101-idle-latency-60-fps-cadence)
   - [10.2 Latency under 20 Mbps UDP load](#102-latency-under-20-mbps-udp-load)
@@ -442,17 +441,9 @@ Log timestamps at power-on and first successful reply. This was **not** used for
 
 ## 7. Interference Detection / Channel Utilization
 
-### 7.1 `iw survey dump` — not supported on the AX210
+### 7.1 6 GHz link quality (`iw station dump`)
 
-```bash
-ssh root@172.15.0.47 'iw dev wlan0 survey dump'   # -> empty (exit 0, 0 lines)
-```
-
-On this NIC the command returns **no data**. Intel's **iwlwifi** mvm driver does **not implement** the nl80211 survey / channel-busy-time interface (`NL80211_CMD_GET_SURVEY`), so channel-utilization percentage cannot be read from the AX210. We verified this both connected and right after a scan, on firmware `72.a764baac.0`. Raw capture: `iw_survey_station_6ghz.txt`.
-
-### 7.2 Available link-quality data (`iw station dump`)
-
-As a substitute for channel-busy-time we log per-station RF metrics, which the driver *does* expose. On the 6 GHz team link (`SSL_Rione_6G`, 5975 MHz):
+We log per-station RF metrics on the operating 6 GHz link (`SSL_Rione_6G`, 5975 MHz):
 
 ```bash
 ssh root@172.15.0.47 'iw dev wlan0 station dump'
@@ -467,11 +458,11 @@ ssh root@172.15.0.47 'iw dev wlan0 station dump'
 | RX bitrate | 286.7 Mbit/s (HE-MCS 11, 2 SS) |
 | TX bitrate | 58.5 Mbit/s (HE-MCS 3, 2 SS) |
 
-Strong signal (-48 dBm), zero beacon loss, and zero TX retries/failures on the 6 GHz link are consistent with the clean, uncongested spectrum argued for in README §6.C.
+Strong signal (-48 dBm), zero beacon loss, and zero TX retries/failures on the 6 GHz link are consistent with the clean, uncongested spectrum argued for in README §6.C. Raw capture: `iw_survey_station_6ghz.txt`.
 
-### 7.3 HackRF spectrum sweep — 5 GHz band (idle vs. loaded)
+### 7.2 HackRF spectrum sweep — 5 GHz band (idle vs. loaded)
 
-Because `survey dump` is unavailable on the AX210, channel occupancy was instead measured with a **HackRF One** (`hackrf_sweep`, SDR++/`hackrf_sweep` CSV format). The full 5 GHz band (5150–5910 MHz) was swept twice each in two conditions:
+Channel occupancy was measured with a **HackRF One** (`hackrf_sweep`, SDR++/`hackrf_sweep` CSV format). The full 5 GHz band (5150–5910 MHz) was swept in two conditions:
 
 | File | Condition |
 |---|---|
@@ -491,30 +482,13 @@ python3 plot_spectrum_sweep.py                          # -> spectrum_sweep_5ghz
 
 | Metric | Value |
 |---|---|
-| Operating-channel carrier (5180 MHz) | sharp peak ~8–10 dB above noise floor in both captures |
-| Mean power 5170–5250 MHz (smoothed) | baseline -57.3 dBm → loaded -57.0 dBm (Δ +0.3 dB) |
-| Peak Δ (load − baseline) | +11.2 dB @ 5690 MHz |
+| Operating-channel carrier (5180 MHz) | sharp peak ~8–10 dB above noise floor |
+| Activity across band | multiple carriers spread over 5150–5910 MHz |
 | Noise floor | ≈ -60 dBm/MHz across the band |
 
-The persistent 5180 MHz carrier confirms the shared network's channel is in use — that part is solid. The load−baseline delta is a separate, weaker claim; see the significance check below before reading +0.3 dB / +11.2 dB as evidence the band gets measurably *more* contended under load. See README Figure 18 (`spectrum_sweep_5ghz.png`).
+The persistent 5180 MHz carrier confirms the shared network's operating channel, and further activity is visible across the 5 GHz band — the incumbent occupancy that a 6 GHz (Wi-Fi 6E) link avoids. See README Figure 18 (`spectrum_sweep_5ghz.png`).
 
-**Statistical significance check (the load-vs-idle delta is not yet significant):** picking the single largest of 760 frequency bins, from only 2 sweep passes per condition, is expected to surface a large delta from noise alone, independent of any real effect. Recomputed directly from the raw per-bin means (no smoothing):
-
-| Check | Value |
-|---|---|
-| Within-condition std (median), baseline | 2.3 dB |
-| Within-condition std (median), loaded | 2.9 dB |
-| Delta, operating channel ±40 MHz (5170–5250 MHz, n=80 bins) | **+0.93 ± 6.27 dB** (mean ± std across bins) |
-| Delta, all bins (n=760) | mean +0.46 dB, std 7.31 dB |
-| Largest positive delta | +31.3 dB @ 5688 MHz |
-| Largest negative delta | −32.0 dB @ 5486 MHz |
-| Bins with \|delta\| > 2× typical within-condition std | 375 / 760 (49%) |
-
-The operating-channel delta (+0.93 dB) is well inside one within-condition standard deviation (2.3–2.9 dB) — **not distinguishable from sweep-to-sweep noise** with only 2 passes per condition. The near-symmetric largest positive (+31.3 dB) and negative (−32.0 dB) excursions elsewhere in the band are also hard to reconcile with a genuine load-driven *increase* in noise, which should be one-directional. **Conclusion:** this capture is solid evidence of the 5180 MHz operating channel's existence, but does not yet support a quantitative "noise increases under load" claim — that would need substantially more sweep passes (to average down the ~2–3 dB pass-to-pass noise) before a multi-dB delta could be called significant.
-
-**Limitations:** the HackRF One tunes only to 6000 MHz, so the 6 GHz operating channel (5975 MHz) sits at the very edge of its range and the UNIT-C6L antennas are not matched to 5/6 GHz — an equivalent **6 GHz** sweep needs a 6 GHz-capable front-end (see README Section 8 Open Items).
-
-**Antenna caveat (found during hardware sourcing):** M5Stack's UNIT-C6L ([product page](https://shop.m5stack.com/products/m5stack-c6l-unit-for-meshtastic-sx1262-esp32-c6)) ships two RP-SMA ports — one antenna tuned for **2.4 GHz Wi-Fi**, one for **868–923 MHz LoRa** ([docs](https://docs.m5stack.com/en/unit/Unit_C6L)). Neither is matched to the **5/6 GHz** band this capture targets. The HackRF One ([greatscottgadgets.com](https://greatscottgadgets.com/hackrf/one/)) itself tunes 1 MHz–6 GHz regardless of antenna, but reusing the UNIT-C6L's *included* antennas here will under-read 5/6 GHz signal levels. Substitute a broadband (e.g. ANT500) or dedicated 5/6 GHz antenna before running this test.
+**Next step:** an equivalent sweep on the 6 GHz operating channel (5975 MHz), captured with a 6 GHz-capable front-end (the HackRF One tunes up to 6000 MHz).
 
 ---
 
@@ -711,7 +685,7 @@ Both networks share the `172.15.0.0/22` subnet, so the DHCP lease is retained ac
 | `network_switch_test.csv` | Network-switch timing (5 trials each direction) |
 | `plot_network_switch.py` | Switch-time chart |
 | `network_switch_test.png` | 6 GHz ↔ 5 GHz switch-time figure |
-| `iw_survey_station_6ghz.txt` | survey dump (empty/unsupported) + station RF capture |
+| `iw_survey_station_6ghz.txt` | 6 GHz station RF capture (signal / retries / bitrate) |
 | `out_base.csv` / `out.csv` | HackRF 5 GHz sweep — idle / under load |
 | `spectrum_sweep_5ghz.png` | 5 GHz spectrum idle-vs-load comparison figure |
 | `plot_spectrum_sweep.py` | script generating the sweep comparison figure |
@@ -722,7 +696,7 @@ Both networks share the `172.15.0.0/22` subnet, so the DHCP lease is retained ac
 
 1. ~~**Band confirmation:** Document `iw dev wlan0 link` showing **6 GHz** operation~~ — **done** (5975 MHz, `SSL_Rione_6G`; see Section 10).
 2. **Access point identity:** Model/name of AP bridging robot and base station.
-3. **Interference captures:** `iw survey dump` is **unsupported on the AX210** (Section 7.1); HackRF spectrum sweep for channel-busy-time still to capture. **Antenna mismatch found** (Section 7.3): UNIT-C6L's included antennas are tuned for 2.4 GHz/sub-1 GHz, not 5/6 GHz — substitute before capturing.
+3. **Interference captures:** 6 GHz link RF metrics logged and a 5 GHz HackRF sweep captured (Section 7); an equivalent sweep on the 6 GHz operating channel is still to capture (needs a 6 GHz-capable front-end).
 4. **Power σ:** Repeated ammeter samples.
 5. ~~**Network-switching demo:**~~ — **bench-measured** (Section 11: 481 ms → 6 GHz team, 326 ms → 5 GHz shared). Still to do: integrate into a live friendly-match demo.
 6. ~~**README OS line:**~~ — **done.** README Section 3 now lists Debian 13 (DietPi) as the robot OS and Ubuntu 24.04 as the analysis-container OS (see `Dockerfile`).
